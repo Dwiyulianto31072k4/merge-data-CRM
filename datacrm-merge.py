@@ -19,15 +19,23 @@ st.write("Upload file Excel yang diproteksi password untuk menggabungkan dan mem
 # Sidebar untuk konfigurasi
 with st.sidebar:
     st.header("Konfigurasi")
-    password = st.text_input("Password File Excel", type="password", value="202502")
-    st.info("Pastikan password sesuai dengan file yang diupload")
+    # Form untuk memasukkan password
+    with st.form(key="password_form"):
+        password = st.text_input("Password File Excel", type="password", value="202502")
+        submit_password = st.form_submit_button("Simpan Password")
+    
+    if submit_password:
+        st.success("Password berhasil disimpan!")
+    
+    st.info("Password yang dimasukkan akan digunakan untuk semua file")
     
     st.subheader("Petunjuk Penggunaan")
     st.markdown("""
-    1. Upload satu atau beberapa file Excel yang diproteksi password
-    2. Tentukan sheet untuk masing-masing file (LOAD atau default)
-    3. Klik tombol "Proses Data" untuk menggabungkan file
-    4. Download hasil penggabungan yang sudah difilter
+    1. Masukkan password untuk file Excel
+    2. Upload satu atau beberapa file Excel yang diproteksi password
+    3. Tentukan sheet untuk masing-masing file (LOAD atau default)
+    4. Klik tombol "Proses Data" untuk menggabungkan file
+    5. Download hasil penggabungan yang sudah difilter
     """)
 
 # Fungsi untuk download dataframe sebagai file Excel
@@ -80,21 +88,44 @@ def process_encrypted_excel(uploaded_file, password, sheet_name):
 upload_container = st.container()
 with upload_container:
     st.subheader("Upload File Excel")
+    
+    # Menampilkan password yang digunakan (bisa diaktifkan/nonaktifkan)
+    show_password = st.checkbox("Tampilkan password yang digunakan")
+    if show_password:
+        st.info(f"Password yang digunakan: {password}")
+    
     uploaded_files = st.file_uploader("Pilih satu atau beberapa file Excel", type=["xlsx"], accept_multiple_files=True)
 
     # Jika ada file yang diupload
     if uploaded_files:
         st.success(f"{len(uploaded_files)} file telah diupload")
         
-        # Opsi untuk sheet yang akan dibaca
-        sheet_options = {}
-        for file in uploaded_files:
-            sheet_choice = st.radio(
-                f"Pilih sheet untuk {file.name}:",
+        # Option untuk menggunakan sheet yang sama untuk semua file
+        use_same_sheet = st.checkbox("Gunakan jenis sheet yang sama untuk semua file", value=True)
+        
+        if use_same_sheet:
+            global_sheet_choice = st.radio(
+                "Pilih sheet untuk semua file:",
                 ["Default (0)", "LOAD"],
-                key=f"sheet_choice_{file.name}"
+                key="global_sheet_choice"
             )
-            sheet_options[file.name] = "LOAD" if sheet_choice == "LOAD" else 0
+            sheet_options = {file.name: "LOAD" if global_sheet_choice == "LOAD" else 0 for file in uploaded_files}
+            
+            # Tampilkan list file dengan sheet yang dipilih
+            st.subheader("File yang akan diproses:")
+            for file in uploaded_files:
+                st.text(f"📄 {file.name} - Sheet: {global_sheet_choice}")
+        else:
+            # Opsi untuk sheet yang akan dibaca untuk masing-masing file
+            sheet_options = {}
+            st.subheader("Pilih sheet untuk masing-masing file:")
+            for file in uploaded_files:
+                sheet_choice = st.radio(
+                    f"Sheet untuk {file.name}:",
+                    ["Default (0)", "LOAD"],
+                    key=f"sheet_choice_{file.name}"
+                )
+                sheet_options[file.name] = "LOAD" if sheet_choice == "LOAD" else 0
 
 # Proses data ketika tombol diklik
 if uploaded_files:
@@ -142,14 +173,14 @@ if uploaded_files:
                     merged_df["period_call"] = pd.to_datetime(merged_df["period_call"], errors="coerce").dt.date
                     
                     # Tampilkan tanggal unik sebelum sorting
-                    unique_dates_before = merged_df["period_call"].unique()
+                    unique_dates_before = sorted(merged_df["period_call"].dropna().unique())
                     st.write("Tanggal unik sebelum sorting:", unique_dates_before)
                     
                     # Urutkan berdasarkan tanggal
                     merged_df = merged_df.sort_values(by="period_call", ascending=False)
                     
                     # Tampilkan tanggal unik setelah sorting
-                    unique_dates_after = merged_df["period_call"].unique()
+                    unique_dates_after = sorted(merged_df["period_call"].dropna().unique(), reverse=True)
                     st.write("Tanggal unik setelah sorting:", unique_dates_after)
                     
                     # Filter untuk menyimpan data terbaru untuk setiap customer
@@ -158,9 +189,13 @@ if uploaded_files:
                     total_after_filter = unique_customers.shape[0]
                     
                     # Tampilkan statistik
-                    st.write(f"Jumlah data sebelum filtering: {total_before_filter}")
-                    st.write(f"Jumlah data setelah filtering berdasarkan customer_no terbaru: {total_after_filter}")
-                    st.write(f"Jumlah duplicate customer yang difilter: {total_before_filter - total_after_filter}")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Data (Sebelum Filter)", f"{total_before_filter:,}")
+                    with col2:
+                        st.metric("Total Data (Setelah Filter)", f"{total_after_filter:,}")
+                    with col3:
+                        st.metric("Duplicate Difilter", f"{total_before_filter - total_after_filter:,}")
                     
                     # Tampilkan preview data
                     st.subheader("Preview Data Hasil Filtering")
@@ -168,11 +203,16 @@ if uploaded_files:
                     
                     # Tampilkan link download
                     st.subheader("Download Hasil")
-                    st.markdown(get_excel_download_link(unique_customers, "filtered_unique_customers.xlsx"), unsafe_allow_html=True)
-                    
-                    # Tampilkan opsi download untuk data sebelum filtering juga
-                    st.markdown(get_excel_download_link(merged_df, "all_merged_data.xlsx"), unsafe_allow_html=True)
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(get_excel_download_link(unique_customers, "filtered_unique_customers.xlsx"), unsafe_allow_html=True)
+                        st.caption("Data customer unik (terbaru)")
+                    with col2:
+                        st.markdown(get_excel_download_link(merged_df, "all_merged_data.xlsx"), unsafe_allow_html=True)
+                        st.caption("Semua data yang digabungkan")
                 else:
                     st.error("Kolom 'period_call' atau 'customer_no' tidak ditemukan setelah merge. Pastikan nama kolom seragam.")
             else:
                 st.error("Tidak ada file yang berhasil dibaca.")
+else:
+    st.info("Silakan upload file Excel terlebih dahulu.")
